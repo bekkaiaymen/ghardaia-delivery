@@ -40,13 +40,16 @@ async function cleanupLegacyUserIndexes() {
   try {
     if (mongoose.connection.readyState !== 1) return;
     const indexes = await User.collection.indexes();
-    const hasLegacyEmailIndex = indexes.some((idx) => idx.name === 'email_1');
-    if (hasLegacyEmailIndex) {
-      await User.collection.dropIndex('email_1');
-      console.log('Dropped legacy index: email_1');
+    
+    // Find and drop any index that involves 'email'
+    const emailIndexes = indexes.filter(idx => Object.keys(idx.key).includes('email'));
+    
+    for (const idx of emailIndexes) {
+      await User.collection.dropIndex(idx.name);
+      console.log(`Dropped legacy index: ${idx.name}`);
     }
   } catch (error) {
-    // Ignore "index not found" and continue startup safely.
+    // Ignore "index not found" errors
     if (error.codeName !== 'IndexNotFound') {
       console.log('Legacy index cleanup warning:', error.message);
     }
@@ -134,10 +137,12 @@ app.post('/api/auth/register', async (req, res) => {
         return res.status(400).json({ success: false, message: 'رقم الواتساب مسجل بالفعل' });
       }
       if (duplicateField === 'email') {
-        return res.status(400).json({ success: false, message: 'يوجد تعارض في فهرس قديم، أعد المحاولة بعد إعادة تشغيل الخدمة' });
+        const errorMsg = 'تعارض في فهرس البريد الإلكتروني القديم. سيتم حله تلقائيًا، يرجى المحاولة مرة أخرى.';
+        await cleanupLegacyUserIndexes(); // Attempt immediate cleanup
+        return res.status(400).json({ success: false, message: errorMsg });
       }
     }
-    res.status(500).json({ success: false, message: 'خطأ في التسجيل', debug: error.message });
+    res.status(500).json({ success: false, message: 'خطأ في الخادم: ' + error.message, debug: error.message });
   }
 });
 
